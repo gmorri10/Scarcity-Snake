@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scarcity Snake</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    font-family: Arial, Helvetica, sans-serif; background: #f4f6f8; color: #17202a;
+  }
+  .wrap { width: min(94vw, 720px); padding: 24px 0 40px; text-align: center; }
+  h1 { margin: 0 0 5px; font-size: 2rem; }
+  .subtitle { margin: 0 0 18px; color: #5b6570; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+  .stat { background: white; border: 1px solid #d9dee3; border-radius: 12px; padding: 10px; }
+  .label { color: #66717c; font-size: .82rem; }
+  .value { font-weight: 800; font-size: 1.35rem; margin-top: 2px; }
+  #status { min-height: 24px; margin: 8px 0 12px; font-weight: 700; }
+  canvas {
+    width: 100%; max-width: 600px; aspect-ratio: 1 / 1; display: block;
+    margin: 0 auto; background: white; border: 2px solid #17202a; border-radius: 12px;
+  }
+  .controls { margin-top: 14px; }
+  button {
+    border: 0; border-radius: 10px; padding: 11px 18px; font-size: 1rem;
+    font-weight: 700; cursor: pointer; background: #17202a; color: white;
+  }
+  button:hover { opacity: .88; }
+  .help { margin: 14px auto 0; max-width: 600px; color: #59636d; line-height: 1.45; font-size: .93rem; }
+  .economics {
+    margin: 18px auto 0; max-width: 600px; text-align: left; background: white;
+    border: 1px solid #d9dee3; border-radius: 12px; padding: 14px 16px;
+  }
+  .economics strong { display:block; margin-bottom:5px; }
+  @media (max-width: 480px) {
+    .wrap { padding-top: 14px; }
+    h1 { font-size: 1.6rem; }
+    .stats { gap: 6px; }
+    .stat { padding: 8px 4px; }
+    .value { font-size: 1.05rem; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>🍎 Scarcity Snake</h1>
+  <p class="subtitle">A supply-and-demand inspired Snake game</p>
+
+  <section class="stats" aria-label="Game statistics">
+    <div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+    <div class="stat"><div class="label">Fruit Supply</div><div class="value" id="supply">0</div></div>
+    <div class="stat"><div class="label">Restock Time</div><div class="value" id="restock">0.4s</div></div>
+  </section>
+
+  <div id="status">High supply — fruit is plentiful.</div>
+  <canvas id="game" width="600" height="600" tabindex="0" aria-label="Scarcity Snake game board"></canvas>
+
+  <div class="controls"><button id="restart" type="button">Restart Game</button></div>
+  <p class="help">Click the board, then use the arrow keys to move. The board begins with lots of fruit. Every time you consume fruit, its replacement takes longer, making supply increasingly scarce.</p>
+
+  <div class="economics">
+    <strong>Economics idea</strong>
+    Demand (you) consumes the available supply of fruit. As consumption increases, the replenishment lag grows, so scarcity becomes more noticeable and finding the next available fruit gets harder.
+  </div>
+</main>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const supplyEl = document.getElementById("supply");
+  const restockEl = document.getElementById("restock");
+  const statusEl = document.getElementById("status");
+  const restartBtn = document.getElementById("restart");
+
+  const GRID = 20;
+  const CELL = canvas.width / GRID;
+  const FRUITS = ["🍎","🍊","🍓","🍇","🍌","🍒","🥝"];
+
+  let snake, direction, nextDirection, fruits, score, eaten, running, loop;
+  let pendingRestocks = [];
+
+  function occupied(x, y) {
+    return snake.some(p => p.x === x && p.y === y) ||
+           fruits.some(p => p.x === x && p.y === y);
+  }
+
+  function randomEmptyCell() {
+    const cells = [];
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        if (!occupied(x, y)) cells.push({x, y});
+      }
+    }
+    return cells.length ? cells[Math.floor(Math.random() * cells.length)] : null;
+  }
+
+  function restockDelay() {
+    return Math.min(8000, 400 + eaten * 350);
+  }
+
+  function addFruit() {
+    if (!running) return;
+    const p = randomEmptyCell();
+    if (!p) return;
+    fruits.push({...p, icon: FRUITS[Math.floor(Math.random() * FRUITS.length)]});
+    updateHUD();
+    draw();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    supplyEl.textContent = fruits.length;
+    restockEl.textContent = (restockDelay() / 1000).toFixed(1) + "s";
+
+    if (fruits.length >= 12) {
+      statusEl.textContent = "High supply — fruit is plentiful.";
+    } else if (fruits.length >= 6) {
+      statusEl.textContent = "Supply is tightening as demand rises.";
+    } else {
+      statusEl.textContent = "Scarcity — demand is outrunning replenishment.";
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#e3e7eb";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= GRID; i++) {
+      ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(canvas.width, i * CELL); ctx.stroke();
+    }
+
+    ctx.font = (CELL * 0.72) + "px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    fruits.forEach(f => ctx.fillText(f.icon, f.x * CELL + CELL/2, f.y * CELL + CELL/2 + 1));
+
+    snake.forEach((p, i) => {
+      ctx.fillStyle = i === 0 ? "#174f2a" : "#2f7d44";
+      ctx.beginPath();
+      ctx.roundRect(p.x * CELL + 2, p.y * CELL + 2, CELL - 4, CELL - 4, 6);
+      ctx.fill();
+    });
+
+    if (!running) {
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 34px Arial";
+      ctx.fillText("Market Crash!", canvas.width/2, canvas.height/2 - 15);
+      ctx.font = "22px Arial";
+      ctx.fillText("Final score: " + score, canvas.width/2, canvas.height/2 + 25);
+    }
+  }
+
+  function setDirection(name) {
+    const map = {
+      up: {x:0,y:-1}, down: {x:0,y:1},
+      left: {x:-1,y:0}, right: {x:1,y:0}
+    };
+    const d = map[name];
+    if (d && !(d.x === -direction.x && d.y === -direction.y)) nextDirection = d;
+  }
+
+  function step() {
+    if (!running) return;
+    direction = nextDirection;
+    const head = {x: snake[0].x + direction.x, y: snake[0].y + direction.y};
+
+    const collision = head.x < 0 || head.x >= GRID || head.y < 0 || head.y >= GRID ||
+      snake.some(p => p.x === head.x && p.y === head.y);
+
+    if (collision) {
+      running = false;
+      clearInterval(loop);
+      pendingRestocks.forEach(clearTimeout);
+      pendingRestocks = [];
+      draw();
+      return;
+    }
+
+    snake.unshift(head);
+    const fruitIndex = fruits.findIndex(f => f.x === head.x && f.y === head.y);
+
+    if (fruitIndex >= 0) {
+      fruits.splice(fruitIndex, 1);
+      score += 10;
+      eaten++;
+      const wait = restockDelay();
+      const timeout = setTimeout(() => {
+        addFruit();
+        pendingRestocks = pendingRestocks.filter(t => t !== timeout);
+      }, wait);
+      pendingRestocks.push(timeout);
+    } else {
+      snake.pop();
+    }
+
+    updateHUD();
+    draw();
+  }
+
+  function reset() {
+    clearInterval(loop);
+    pendingRestocks.forEach(clearTimeout);
+    pendingRestocks = [];
+    snake = [{x:10,y:10},{x:9,y:10},{x:8,y:10}];
+    direction = {x:1,y:0};
+    nextDirection = {x:1,y:0};
+    fruits = [];
+    score = 0;
+    eaten = 0;
+    running = true;
+
+    for (let i = 0; i < 18; i++) addFruit();
+    updateHUD();
+    draw();
+    loop = setInterval(step, 115);
+    canvas.focus();
+  }
+
+  document.addEventListener("keydown", e => {
+    const keys = {ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right"};
+    if (keys[e.key]) {
+      e.preventDefault();
+      setDirection(keys[e.key]);
+    }
+  });
+
+  restartBtn.addEventListener("click", reset);
+  canvas.addEventListener("click", () => canvas.focus());
+
+  reset();
+})();
+</script>
+</body>
+</html>
